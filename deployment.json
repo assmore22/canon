@@ -1,0 +1,15 @@
+{
+  "project": "19-canon",
+  "name": "CanonRegistry",
+  "network": "testnetBradbury",
+  "chainId": 4221,
+  "rpc": "https://rpc-bradbury.genlayer.com",
+  "explorer": "https://explorer-bradbury.genlayer.com",
+  "contractAddress": "0x4BF07B4F4B2ba811adDaDD716fCf061D53903f44",
+  "deployTxHash": "0xcec6123953c342a667a57f8b7c9f3fd6f58e0877aba13cbd0d13aa2269605043",
+  "contractExplorer": "https://explorer-bradbury.genlayer.com/address/0x4BF07B4F4B2ba811adDaDD716fCf061D53903f44",
+  "deployer": "0xdAa923b817C6116f2463957542FB29F6Ba671FE8",
+  "deployedAt": "2026-07-01T15:43:46.471Z",
+  "statusName": 5,
+  "smoke": {}
+}
