@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Canon - The registry of record</title>
+<meta name="description" content="An on-chain authorship and priority registry on GenLayer. Register a work by its public source; a validator set confirms the source hosts it, then it is sealed with a permanent canon number nobody can backdate." />
+<link rel="stylesheet" href="./styles.css?v=6">
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/bold/style.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="mast-top">
+    <a class="brand" href="#"><span class="seal-mini"></span> Canon</a>
+    <div class="mast-end">
+      <span id="walletslot"><button class="btn ghost sm" id="connectBtn">Connect</button></span>
+      <button class="btn primary sm" id="navPostBtn">Register a work</button>
+    </div>
+  </div>
+  <div class="mast-body">
+    <canvas id="sealCanvas"></canvas>
+    <div class="mast-text">
+      <span class="kicker">On-chain registry of record · GenLayer</span>
+      <h1>The registry of record.</h1>
+      <p>Register a work by the public source where it lives. A validator set reads that source and confirms it genuinely hosts the work as claimed - then it is sealed with a permanent canon number and an on-chain record of authorship and priority. No committee, no backdating, no take-backs.</p>
+      <div class="mast-counts">
+        <span><b id="stSealed">0</b> sealed</span><span class="div">/</span>
+        <span><b id="stTotal">0</b> registered</span><span class="div">/</span>
+        <span><b id="stRejected">0</b> rejected</span>
+        <button class="btn ghost sm" id="refreshBtn" style="margin-left:auto"><i class="ph-bold ph-arrows-clockwise"></i> Sync</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="ledger-wrap">
+  <div class="ledger-h"><span class="lh-line"></span><span class="lh-label">THE LEDGER</span><span class="lh-line"></span></div>
+  <ol class="ledger" id="ledger"><div class="l-empty">Reading the chain…</div></ol>
+</main>
+
+<footer class="footer">
+  <p class="foot-how">Register a work · validators read the source and confirm it · the work is sealed into the canon, forever.</p>
+  <div class="foot-base">
+    <span>Canon · authorship &amp; priority registry on GenLayer studionet</span>
+    <span class="foot-links"><a id="contractLink" href="https://explorer-studio.genlayer.com/contracts/0x2043619F63E7123474206d1114d58099d4221A13" target="_blank" rel="noopener">Contract 0x2043...1A13 -></a><a href="https://docs.genlayer.com/" target="_blank" rel="noopener">GenLayer ↗</a><span class="net"><span class="net-dot"></span>studionet live</span></span>
+  </div>
+</footer>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer">
+  <div class="drawer-h"><h3 id="drawerTitle">Register a work</h3><button class="icon-btn" id="closeDrawer" aria-label="Close"><i class="ph-bold ph-x"></i></button></div>
+  <div class="drawer-b" id="drawerBody"></div>
+</aside>
+<div id="log"></div>
+<script type="module" src="./app.js?v=1"></script>
+</body>
+</html>
