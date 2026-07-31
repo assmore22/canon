@@ -158,6 +158,7 @@ def _dispute_prompt(kind, record, verdict, summary, claim, evidence_txt):
         "\n" + kind.upper() + " EVIDENCE (untrusted rendered page):\n" + evidence_txt +
         "\nReply with ONE JSON object only: {\"ruling\":\"" + opts + "\",\"confidenceDeltaBps\":<int -10000..10000>,"
         "\"reason\":\"short neutral reason\",\"riskFlags\":[\"...\"],\"reasoningDigest\":\"public conclusion only\"}"
+        + "\nRequired revisedVerdict options: authentic|rejected|conflicted|inconclusive."
     )
 
 
@@ -177,10 +178,12 @@ class CanonRegistry(gl.Contract):
     recent_ids: DynArray[str]
     canon_standard: str
     sealed_total: u256
+    admin: str
     clock: u256
 
     def __init__(self) -> None:
         self.clock = 0
+        self.admin = gl.message.sender_address.as_hex
         self.sealed_total = 0
         self.canon_standard = "A canon record must cite a public source that genuinely hosts the described work, support authorship/priority claims, and disclose contradictions or uncertainty."
 
@@ -226,8 +229,28 @@ class CanonRegistry(gl.Contract):
         rec["status"] = status
 
     def _require_owner(self, rec: dict, actor: str) -> None:
-        if rec["author"].lower() != actor.lower():
-            raise Exception("unauthorized")
+        if str(actor).lower() != self.admin.lower() and str(rec["author"]).lower() != str(actor).lower():
+            raise Exception("record_operator_only")
+
+
+    def _require_admin(self) -> None:
+        if gl.message.sender_address.as_hex.lower() != self.admin.lower():
+            raise Exception("admin_only")
+
+    def _has_open_filings(self, record: dict) -> bool:
+        for challenge_id in record.get("challengeIds", []):
+            try:
+                if json.loads(self.challenges[int(challenge_id)]).get("status") == "open":
+                    return True
+            except Exception:
+                continue
+        for appeal_id in record.get("appealIds", []):
+            try:
+                if json.loads(self.appeals[int(appeal_id)]).get("status") == "open":
+                    return True
+            except Exception:
+                continue
+        return False
 
     def _require_mutable(self, rec: dict) -> None:
         if rec["status"] in ("FINALIZED", "ARCHIVED"):
@@ -323,6 +346,8 @@ class CanonRegistry(gl.Contract):
     # ------------------------------ write methods ------------------------------
     @gl.public.write
     def set_canon_standard(self, standard: str) -> str:
+        if gl.message.sender_address.as_hex.lower() != self.admin.lower():
+            raise Exception("admin_only")
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         txt = _s(standard, 2200)
@@ -375,6 +400,7 @@ class CanonRegistry(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         rec = self._load_record(record_id)
+        self._require_owner(rec, actor)
         self._require_mutable(rec)
         if rec["status"] not in ("DRAFT", "OPEN", "UNDER_REVIEW", "REVIEWED"):
             raise Exception("invalid_transition")
@@ -395,6 +421,7 @@ class CanonRegistry(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         rec = self._load_record(record_id)
+        self._require_owner(rec, actor)
         self._require_mutable(rec)
         text = _s(proposed_change, 700)
         if text == "":
@@ -415,6 +442,7 @@ class CanonRegistry(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         rec = self._load_record(record_id)
+        self._require_owner(rec, actor)
         self._require_mutable(rec)
         c = _s(claim, 700)
         if c == "":
@@ -434,6 +462,7 @@ class CanonRegistry(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         rec = self._load_record(record_id)
+        self._require_owner(rec, actor)
         self._require_mutable(rec)
         if rec["status"] not in ("OPEN", "DRAFT", "REVIEWED"):
             raise Exception("invalid_transition")
@@ -448,6 +477,7 @@ class CanonRegistry(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         rec = self._load_record(record_id)
+        self._require_owner(rec, actor)
         self._require_mutable(rec)
         if rec["status"] not in ("UNDER_REVIEW", "OPEN", "REVIEWED"):
             raise Exception("invalid_transition")
@@ -545,6 +575,7 @@ class CanonRegistry(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         rec = self._load_record(record_id)
+        self._require_owner(rec, actor)
         if rec["status"] != "CHALLENGE_WINDOW":
             raise Exception("invalid_transition")
         ch = self._load_challenge(challenge_id)
@@ -562,7 +593,9 @@ class CanonRegistry(gl.Contract):
             except Exception:
                 txt = "[source unavailable]"
             raw = gl.nondet.exec_prompt(_dispute_prompt("challenge", rec, rec["verdict"], rec["summary"], claim, txt), response_format="json")
-            return json.dumps(_norm_ruling(raw, ("accepted", "rejected", "partially_accepted", "inconclusive"), "inconclusive"), sort_keys=True)
+            normalized = _norm_ruling(raw, ("accepted", "rejected", "partially_accepted", "inconclusive"), "inconclusive")
+            normalized["revisedVerdict"] = _s(raw.get("revisedVerdict", raw.get("revisedOutcome", "")), 40).lower() if isinstance(raw, dict) else ""
+            return json.dumps(normalized, sort_keys=True)
 
         res = json.loads(gl.eq_principle.prompt_comparative(leader, "Equal if same ruling."))
         ch["status"] = res["ruling"]
@@ -572,6 +605,10 @@ class CanonRegistry(gl.Contract):
         self.challenges[int(challenge_id)] = json.dumps(ch)
         rec["confidenceBps"] = max(0, min(10000, int(rec["confidenceBps"]) + int(res["confidenceDeltaBps"])))
         if res["ruling"] in ("accepted", "partially_accepted"):
+            revised = str(res.get("revisedVerdict", "")).lower()
+            if revised not in ("authentic", "rejected", "conflicted", "inconclusive",):
+                revised = rec["verdict"]
+            rec["verdict"] = revised
             self._rep_bump(ch["challenger"], 50, "successfulChallenges")
         elif res["ruling"] == "rejected":
             self._rep_bump(ch["challenger"], -30, "failedChallenges")
@@ -584,6 +621,8 @@ class CanonRegistry(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         rec = self._load_record(record_id)
+        if self._has_open_filings(rec):
+            raise Exception("open_filing_blocks_appeal")
         if rec["status"] not in ("CHALLENGE_WINDOW", "APPEALED"):
             raise Exception("invalid_transition")
         r = _s(reason, 700)
@@ -607,6 +646,7 @@ class CanonRegistry(gl.Contract):
         self.clock += 1
         actor = gl.message.sender_address.as_hex
         rec = self._load_record(record_id)
+        self._require_owner(rec, actor)
         if rec["status"] != "APPEALED":
             raise Exception("invalid_transition")
         ap = self._load_appeal(appeal_id)
@@ -624,7 +664,9 @@ class CanonRegistry(gl.Contract):
             except Exception:
                 txt = "[source unavailable]"
             raw = gl.nondet.exec_prompt(_dispute_prompt("appeal", rec, rec["verdict"], rec["summary"], reason, txt), response_format="json")
-            return json.dumps(_norm_ruling(raw, ("granted", "denied", "partially_granted", "inconclusive"), "inconclusive"), sort_keys=True)
+            normalized = _norm_ruling(raw, ("granted", "denied", "partially_granted", "inconclusive"), "inconclusive")
+            normalized["revisedVerdict"] = _s(raw.get("revisedVerdict", raw.get("revisedOutcome", "")), 40).lower() if isinstance(raw, dict) else ""
+            return json.dumps(normalized, sort_keys=True)
 
         res = json.loads(gl.eq_principle.prompt_comparative(leader, "Equal if same ruling."))
         ap["status"] = res["ruling"]
@@ -633,6 +675,11 @@ class CanonRegistry(gl.Contract):
         ap["riskFlags"] = res["riskFlags"]
         self.appeals[int(appeal_id)] = json.dumps(ap)
         rec["confidenceBps"] = max(0, min(10000, int(rec["confidenceBps"]) + int(res["confidenceDeltaBps"])))
+        if res["ruling"] in ("granted", "partially_granted"):
+            revised = str(res.get("revisedVerdict", "")).lower()
+            if revised not in ("authentic", "rejected", "conflicted", "inconclusive",):
+                revised = rec["verdict"]
+            rec["verdict"] = revised
         before = rec["status"]
         self._set_status(rec, "CHALLENGE_WINDOW")
         self._add_audit(rec, actor, "resolve_appeal_with_genlayer", res["reason"][:140], before, "CHALLENGE_WINDOW")
@@ -645,6 +692,8 @@ class CanonRegistry(gl.Contract):
         actor = gl.message.sender_address.as_hex
         rec = self._load_record(record_id)
         self._require_owner(rec, actor)
+        if self._has_open_filings(rec):
+            raise Exception("open_filing_blocks_finalize")
         if rec["status"] not in ("REVIEWED", "CHALLENGE_WINDOW"):
             raise Exception("invalid_transition")
         if rec["verdict"] == "unreviewed":

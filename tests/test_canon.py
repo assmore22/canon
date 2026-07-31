@@ -1,62 +1,132 @@
-"""Tests for CANON (direct runner). AI seal() validated live on studionet."""
+"""Executable Canon V2 permissions and review-lifecycle tests."""
+
+import json
 from pathlib import Path
 
-CONTRACT = str(Path(__file__).resolve().parents[1] / "contracts" / "canon.py")
-W_PENDING = 0; W_SEALED = 1; W_REJECTED = 2
+
+CONTRACT = str(Path(__file__).resolve().parents[1] / "contracts" / "canon_v2.py")
 
 
-def _reg(c, vm, who, title="My poem", url="https://example.com", desc="An original poem"):
-    vm.sender = who
-    return c.register(title, url, desc)
+def _deploy_record(deploy, vm, owner):
+    vm.sender = owner
+    contract = deploy(CONTRACT)
+    record_id = contract.create_record("Origin record", "https://example.com", "A source-backed authorship claim", "work")
+    return contract, str(record_id)
 
 
-def test_register(deploy, direct_vm, direct_alice):
-    c = deploy(CONTRACT)
-    wid = _reg(c, direct_vm, direct_alice)
-    assert wid == 0
-    w = c.get_work(0)
-    assert w["status"] == W_PENDING
-    assert w["canon_no"] == 0
-    assert w["title"] == "My poem"
+def _mock_review(vm):
+    vm.mock_llm(
+        r"CanonRegistry, a neutral",
+        json.dumps({
+            "verdict": "authentic",
+            "outcomeStatus": "authentic",
+            "score": 86,
+            "confidenceBps": 8500,
+            "accuracyBps": 8400,
+            "authenticityBps": 8600,
+            "priorityStrengthBps": 8100,
+            "coordinateMatchBps": 9000,
+            "existenceBps": 9100,
+            "feasibilityBps": 8200,
+            "marketBps": 7600,
+            "executionRiskBps": 2100,
+            "supportBps": 8700,
+            "edgeConsistencyBps": 8300,
+            "summary": "Public evidence supports the reviewed record.",
+            "publicSummary": "Public evidence supports the reviewed record.",
+            "rationale": "The independent source and record align.",
+            "reasoningDigest": "Source-backed review completed.",
+            "recommendedNextStep": "finalize_after_review",
+            "riskFlags": [],
+            "sourceScores": [],
+            "sourceCredibility": [],
+            "signalCredibility": [],
+            "supportingSignalIds": [],
+            "contradictingSignalIds": [],
+            "supportingCitationIds": [],
+            "conflictingCitationIds": [],
+            "supportingEvidenceIds": [],
+            "conflictingEvidenceIds": [],
+            "contradictionIds": [],
+            "revisionRisks": [],
+            "missingEvidence": [],
+        }),
+    )
 
 
-def test_register_requires_title(deploy, direct_vm, direct_alice):
-    c = deploy(CONTRACT)
+def _mock_ruling(vm, pattern, ruling, revised):
+    vm.mock_llm(
+        pattern,
+        json.dumps({
+            "ruling": ruling,
+            "revisedVerdict": revised,
+            "confidenceDeltaBps": -1100 if revised == "conflicted" else 900,
+            "scoreDelta": -20 if revised == "conflicted" else 18,
+            "reason": "The filing provides controlling public evidence.",
+            "reasoningDigest": "The reviewed outcome was revised.",
+            "riskFlags": [],
+        }),
+    )
+
+
+def test_owner_and_protocol_permissions_execute(
+    deploy, direct_vm, direct_alice, direct_bob
+):
+    contract, record_id = _deploy_record(deploy, direct_vm, direct_alice)
+
+    direct_vm.sender = direct_bob
+    with direct_vm.expect_revert("admin_only"):
+        contract.set_canon_standard("A controlled review standard")
+
+    direct_vm.sender = direct_bob
+    with direct_vm.expect_revert("record_operator_only"):
+        contract.add_citation(record_id, "https://example.org", "archive", "Independent citation")
+    with direct_vm.expect_revert("record_operator_only"):
+        contract.review_with_genlayer(record_id)
+
+
+def test_challenge_and_appeal_revise_record_before_finalization(
+    deploy, direct_vm, direct_alice, direct_bob
+):
+    contract, record_id = _deploy_record(deploy, direct_vm, direct_alice)
     direct_vm.sender = direct_alice
-    with direct_vm.expect_revert("a title is required"):
-        c.register("", "https://x.com", "d")
+    _mock_review(direct_vm)
+    contract.review_with_genlayer(record_id)
+    contract.open_challenge_window(record_id)
 
+    direct_vm.sender = direct_bob
+    challenge_id = contract.submit_challenge(
+        record_id,
+        "A newer source contradicts the reviewed result.",
+        "https://example.org/challenge",
+    )
 
-def test_register_requires_url(deploy, direct_vm, direct_alice):
-    c = deploy(CONTRACT)
     direct_vm.sender = direct_alice
-    with direct_vm.expect_revert("a work URL is required"):
-        c.register("t", "", "d")
+    with direct_vm.expect_revert("open_filing_blocks_finalize"):
+        contract.finalize_record(record_id)
 
+    _mock_ruling(direct_vm, r"resolving a CHALLENGE", "accepted", "conflicted")
+    contract.resolve_challenge_with_genlayer(record_id, challenge_id)
+    record = json.loads(contract.get_record(record_id))
+    assert record["verdict"] == "conflicted"
 
-def test_register_requires_desc(deploy, direct_vm, direct_alice):
-    c = deploy(CONTRACT)
+    direct_vm.sender = direct_bob
+    appeal_id = contract.submit_appeal(
+        record_id,
+        "A final publication restores the original result.",
+        "https://example.net/appeal",
+    )
+
     direct_vm.sender = direct_alice
-    with direct_vm.expect_revert("a description is required"):
-        c.register("t", "https://x.com", "")
+    with direct_vm.expect_revert("open_filing_blocks_finalize"):
+        contract.finalize_record(record_id)
 
+    _mock_ruling(direct_vm, r"resolving a APPEAL", "granted", "authentic")
+    contract.resolve_appeal_with_genlayer(record_id, appeal_id)
+    contract.finalize_record(record_id)
 
-def test_seal_bad_id(deploy, direct_vm, direct_alice):
-    c = deploy(CONTRACT)
-    direct_vm.sender = direct_alice
-    with direct_vm.expect_revert("no such work"):
-        c.seal(0)
-
-
-def test_sealed_count_zero(deploy, direct_vm, direct_alice):
-    c = deploy(CONTRACT)
-    _reg(c, direct_vm, direct_alice)
-    assert c.sealed_count() == 0
-
-
-def test_multiple(deploy, direct_vm, direct_alice):
-    c = deploy(CONTRACT)
-    _reg(c, direct_vm, direct_alice, title="Work A")
-    _reg(c, direct_vm, direct_alice, title="Work B")
-    assert c.get_work_count() == 2
-    assert c.get_work(1)["title"] == "Work B"
+    record = json.loads(contract.get_record(record_id))
+    assert record["status"] == "FINALIZED"
+    assert record["verdict"] == "authentic"
+    assert record["challengeIds"] == [challenge_id]
+    assert record["appealIds"] == [appeal_id]

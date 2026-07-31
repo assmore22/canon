@@ -1,7 +1,8 @@
 import { makeReader, write, connectWallet, activeAccount, balanceOf, short, toGen, GEN, fmtErr }
   from "./shared/genlayer-lite.js";
+import { mountReviewDesk } from "./shared/review-desk.js";
 
-const CONTRACT = "0x4BF07B4F4B2ba811adDaDD716fCf061D53903f44";
+const CONTRACT = "0xF8b6C5333345c1C6BE403B1c6248a31fd4CAd337";
 const { read } = makeReader(CONTRACT);
 const W_PENDING = 0, W_SEALED = 1, W_REJECTED = 2;
 const STLABEL = ["Pending", "Sealed", "Rejected"];
@@ -9,6 +10,16 @@ const ECLS = ["es-pending", "es-sealed", "es-rejected"];
 const DCLS = ["pending", "", "rejected"];
 let account = null, works = [];
 const $ = (id) => document.getElementById(id);
+
+queueMicrotask(() => mountReviewDesk({
+  contract: CONTRACT, read, write, ensureWallet, fmtErr,
+  entity: "Canon record", idLabel: "Record ID", countMethod: "get_work_count", recordMethod: "get_record",
+  openWindowMethod: "open_challenge_window", submitChallengeMethod: "submit_challenge", resolveChallengeMethod: "resolve_challenge_with_genlayer",
+  submitAppealMethod: "submit_appeal", resolveAppealMethod: "resolve_appeal_with_genlayer", finalMethod: "finalize_record", archiveMethod: "archive_record",
+  variant: "docket", kicker: "Source and citation review", title: "Canon objection docket",
+  intro: "Reopen a sealed entry only through evidence, decide contradictions in public, and finalize the accepted version before it enters the archive.",
+  finalLabel: "Finalize edition", archiveLabel: "Archive edition",
+}));
 const esc = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (_) { return u; } };
 
@@ -32,8 +43,7 @@ async function ensureWallet() { if (!account) account = await connectWallet(); a
 async function load() {
   try {
     const count = Number(await read("get_work_count"));
-    const out = [];
-    for (let i = 0; i < count; i++) out.push({ id: i, ...(await read("get_work", [i])) });
+    const out = await Promise.all(Array.from({ length: count }, (_, i) => read("get_work", [i]).then((record) => ({ id: i, ...record }))));
     works = out; renderLedger();
     $("stTotal").textContent = count;
     $("stSealed").textContent = out.filter((w) => Number(w.status) === W_SEALED).length;
