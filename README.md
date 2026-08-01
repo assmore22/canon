@@ -8,7 +8,7 @@ Canon treats a fact record like a living registry entry. Citations, contradictio
 
 | Surface | Link |
 | --- | --- |
-| Live app | https://assmore22-canon.vercel.app |
+| Live app | https://tanawo3-canon.vercel.app |
 | GitHub | https://github.com/assmore22/canon |
 | Contract | https://explorer-bradbury.genlayer.com/address/0xF8b6C5333345c1C6BE403B1c6248a31fd4CAd337 |
 
